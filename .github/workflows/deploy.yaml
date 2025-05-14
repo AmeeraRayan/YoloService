@@ -42,4 +42,7 @@ jobs:
 
       - name: Execute script on EC2
         run: |
-          ssh ec2 "cd ~/${REPO_NAME} && bash deploy.sh"
+          ssh ec2 "cd ~/${REPO_NAME} && ls -la && bash deploy.sh"
+      - name: Debug EC2 files
+        run: |
+          ssh ec2 "cd ~/${REPO_NAME} && ls -la && cat deploy.sh"
