@@ -1,7 +1,10 @@
-import requests
+from fastapi.testclient import TestClient
+from app import app  # ודאי שקובץ app.py מכיל את האובייקט FastAPI בשם app
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+client = TestClient(app)
 
-BASE_URL = "http://localhost:8000"  # נעדכן את זה בהמשך לכתובת EC2
-
-def test_home():
-    response = requests.get(f"{BASE_URL}/")
+def test_homepage():
+    response = client.get("/")
     assert response.status_code == 200
