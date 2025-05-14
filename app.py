@@ -6,7 +6,7 @@ import sqlite3
 import os
 import uuid
 import shutil
-
+import boto3
 # Disable GPU usage
 import torch
 torch.cuda.is_available = lambda: False
@@ -55,6 +55,11 @@ def init_db():
 
 init_db()
 
+def download_from_s3(image_name, local_path):
+    s3 = boto3.client("s3")
+    bucket = "ameera-polybot-images"  # תוודאי שזה השם שלך
+    s3.download_file(bucket, image_name, local_path)
+
 def save_prediction_session(uid, original_image, predicted_image):
     """
     Save prediction session to database
@@ -75,41 +80,49 @@ def save_detection_object(prediction_uid, label, score, box):
             VALUES (?, ?, ?, ?)
         """, (prediction_uid, label, score, str(box)))
 
+
 @app.post("/predict")
-def predict(file: UploadFile = File(...)):
-    """
-    Predict objects in an image
-    """
-    ext = os.path.splitext(file.filename)[1]
-    uid = str(uuid.uuid4())
-    original_path = os.path.join(UPLOAD_DIR, uid + ext)
-    predicted_path = os.path.join(PREDICTED_DIR, uid + ext)
+async def predict_s3(request: Request):
+    try:
+        data = await request.json()
+        image_name = data.get("image_name")
+        if not image_name:
+            raise HTTPException(status_code=400, detail="Missing image_name")
 
-    with open(original_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+        uid = str(uuid.uuid4())
+        ext = os.path.splitext(image_name)[1]
+        original_path = os.path.join(UPLOAD_DIR, uid + ext)
+        predicted_path = os.path.join(PREDICTED_DIR, uid + ext)
 
-    results = model(original_path, device="cpu")
+        # שלב 1: הורדת התמונה מה־S3
+        download_from_s3(image_name, original_path)
 
-    annotated_frame = results[0].plot()  # NumPy image with boxes
-    annotated_image = Image.fromarray(annotated_frame)
-    annotated_image.save(predicted_path)
+        # שלב 2: הרצת YOLO על התמונה
+        results = model(original_path, device="cpu")
+        annotated_frame = results[0].plot()
+        annotated_image = Image.fromarray(annotated_frame)
+        annotated_image.save(predicted_path)
 
-    save_prediction_session(uid, original_path, predicted_path)
-    
-    detected_labels = []
-    for box in results[0].boxes:
-        label_idx = int(box.cls[0].item())
-        label = model.names[label_idx]
-        score = float(box.conf[0])
-        bbox = box.xyxy[0].tolist()
-        save_detection_object(uid, label, score, bbox)
-        detected_labels.append(label)
+        # שלב 3: שמירה במסד נתונים
+        save_prediction_session(uid, original_path, predicted_path)
 
-    return {
-        "prediction_uid": uid, 
-        "detection_count": len(results[0].boxes),
-        "labels": detected_labels
-    }
+        detected_labels = []
+        for box in results[0].boxes:
+            label_idx = int(box.cls[0].item())
+            label = model.names[label_idx]
+            score = float(box.conf[0])
+            bbox = box.xyxy[0].tolist()
+            save_detection_object(uid, label, score, bbox)
+            detected_labels.append(label)
+
+        return {
+            "prediction_uid": uid,
+            "detection_count": len(results[0].boxes),
+            "labels": detected_labels
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process image: {str(e)}")
 
 @app.get("/prediction/{uid}")
 def get_prediction_by_uid(uid: str):
