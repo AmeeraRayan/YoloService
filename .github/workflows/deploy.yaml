@@ -38,8 +38,8 @@ jobs:
 
       - name: Copy script to EC2
         run: |
-          ssh ec2 "if [ -d ~/${REPO_NAME} ]; then cd ~/${REPO_NAME} && git pull; else git clone ${REPO_URL} ~/${REPO_NAME}; fi"
+          ssh ec2 "if [ -d ~/${REPO_NAME} ]; then cd ~/${REPO_NAME} && git pull; else git clone --branch feature/user_images_upload_to_s3 ${REPO_URL} ~/${REPO_NAME}; fi"
 
       - name: Execute script on EC2
         run: |
-          ssh ec2 "cd ~/YoloService && ls -la && bash deploy.sh"
+          ssh ec2 "cd ${REPO_NAME} && bash deploy.sh"
