@@ -80,7 +80,9 @@ def save_detection_object(prediction_uid, label, score, box):
             VALUES (?, ?, ?, ?)
         """, (prediction_uid, label, score, str(box)))
 
-
+@app.get("/")
+def read_root():
+    return {"message": "Welcome!"}
 @app.post("/predict")
 async def predict_s3(request: Request):
     try:
