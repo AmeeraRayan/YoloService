@@ -120,7 +120,7 @@ async def predict_s3(request: Request):
 
         # שלב 2: הורדת התמונה מ־S3
         print("[INFO] Downloading image from S3...")
-        download_from_s3(image_name, original_path, BUCKET_NAME, REGION_NAME)
+        download_from_s3(image_name, original_path)
 
         # שלב 3: הרצת YOLO
         print("[INFO] Running YOLO model...")
@@ -145,7 +145,7 @@ async def predict_s3(request: Request):
         # שלב 5: העלאה חזרה ל־S3
         print("[INFO] Uploading predicted image to S3...")
         predicted_s3_key = f"predicted/{uid}_predicted{ext}"
-        upload_to_s3(predicted_path, predicted_s3_key, BUCKET_NAME, REGION_NAME)
+        upload_to_s3(predicted_path, predicted_s3_key)
 
         print("[INFO] Prediction completed successfully.")
         return {
