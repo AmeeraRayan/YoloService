@@ -96,27 +96,41 @@ def save_detection_object(prediction_uid, label, score, box):
 def read_root():
     return {"message": "Welcome!"}
 
+
+
 @app.post("/predict")
 async def predict_s3(request: Request):
-    try:
-        data = await request.json()
-        image_name = data.get("image_name")
-        if not image_name:
-            raise HTTPException(status_code=400, detail="Missing image_name")
+    data = await request.json()
+    image_name = data.get("image_name")
 
-        uid = generate_uid(image_name)
+    # שלב 1: בדיקת שדות חובה
+    if not image_name:
+        print("[ERROR] Missing image_name in request")
+        raise HTTPException(status_code=400, detail="Missing image_name")
+
+    try:
+        print(f"[INFO] Starting prediction for image: {image_name}")
+
+        # יצירת UID ושמות קבצים
+        uid = str(uuid.uuid4())
         ext = os.path.splitext(image_name)[1]
+        base_name = os.path.splitext(image_name)[0]
         original_path = os.path.join(UPLOAD_DIR, f"{uid}{ext}")
         predicted_path = os.path.join(PREDICTED_DIR, f"{uid}_predicted{ext}")
 
-        logging.info(f"[{uid}] Starting prediction for image: {image_name}")
+        # שלב 2: הורדת התמונה מ־S3
+        print("[INFO] Downloading image from S3...")
+        download_from_s3(image_name, original_path, BUCKET_NAME, REGION_NAME)
 
-        download_from_s3(image_name, original_path)
-
+        # שלב 3: הרצת YOLO
+        print("[INFO] Running YOLO model...")
         results = model(original_path, device="cpu")
         annotated_frame = results[0].plot()
-        Image.fromarray(annotated_frame).save(predicted_path)
+        annotated_image = Image.fromarray(annotated_frame)
+        annotated_image.save(predicted_path)
 
+        # שלב 4: שמירת המידע במסד נתונים
+        print("[INFO] Saving prediction to database...")
         save_prediction_session(uid, original_path, predicted_path)
 
         detected_labels = []
@@ -128,10 +142,12 @@ async def predict_s3(request: Request):
             save_detection_object(uid, label, score, bbox)
             detected_labels.append(label)
 
+        # שלב 5: העלאה חזרה ל־S3
+        print("[INFO] Uploading predicted image to S3...")
         predicted_s3_key = f"predicted/{uid}_predicted{ext}"
-        upload_to_s3(predicted_path, predicted_s3_key)
-        logging.info(f"[{uid}] Prediction completed.")
+        upload_to_s3(predicted_path, predicted_s3_key, BUCKET_NAME, REGION_NAME)
 
+        print("[INFO] Prediction completed successfully.")
         return {
             "prediction_uid": uid,
             "detection_count": len(detected_labels),
@@ -140,10 +156,8 @@ async def predict_s3(request: Request):
         }
 
     except Exception as e:
-        logging.error(f"[ERROR] {str(e)}")
-        traceback.print_exc()
+        print(f"[ERROR] Failed to process image: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to process image: {str(e)}")
-
 
 @app.get("/health")
 def health():
