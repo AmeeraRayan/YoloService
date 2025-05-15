@@ -139,9 +139,6 @@ async def predict_s3(request: Request):
         }
 
     except Exception as e:
-        import traceback
-        traceback.print.exc()
-        print (f"[ERROR) {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to process image: {str(e)}")
 
 @app.get("/prediction/{uid}")
