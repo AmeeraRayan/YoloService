@@ -1,3 +1,5 @@
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from ultralytics import YOLO
@@ -87,15 +89,15 @@ def read_root():
     return {"message": "Welcome!"}
 @app.post("/predict")
 async def predict_s3(request: Request):
+    data = await request.json()
+
+    image_name = data.get("image_name")
+    bucket_name = data.get("bucket_name")
+    region_name = data.get("region_name")
+    if not image_name or not bucket_name or not region_name:
+        raise HTTPException(status_code=400, detail="Missing required fields")
+
     try:
-        data = await request.json()
-        image_name = data.get("image_name")
-        bucket_name = data.get("bucket_name")
-        region_name = data.get("region_name")
-
-        if not image_name or not bucket_name or not region_name:
-            raise HTTPException(status_code=400, detail="Missing required fields")
-
         uid = str(uuid.uuid4())
         ext = os.path.splitext(image_name)[1]
         base_name = os.path.splitext(image_name)[0]
