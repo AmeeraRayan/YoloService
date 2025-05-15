@@ -17,7 +17,7 @@ def test_homepage():
 
 def test_predict_success():
     response = client.post("/predict", json={
-        "image_name": "file_60.jpg",
+        "image_name": "file_53.jpg",
         "bucket_name": "ameera-polybot-images",
         "region_name": "eu-north-1"
     })
