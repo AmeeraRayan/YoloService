@@ -13,6 +13,8 @@ import boto3
 import torch
 torch.cuda.is_available = lambda: False
 app = FastAPI()
+BUCKET_NAME = "ameera-polybot-images"
+REGION_NAME = "eu-north-1"
 
 UPLOAD_DIR = "uploads/original"
 PREDICTED_DIR = "uploads/predicted"
@@ -57,8 +59,8 @@ def init_db():
 init_db()
 
 def download_from_s3(image_name, local_path,bucket,region):
-    s3 = boto3.client("s3",region_name=region)
-    s3.download_file(bucket, image_name, local_path)
+    s3 = boto3.client("s3",region_name=REGION_NAME)
+    s3.download_file(BUCKET_NAME, image_name, local_path)
 
 def save_prediction_session(uid, original_image, predicted_image):
     """
@@ -81,8 +83,8 @@ def save_detection_object(prediction_uid, label, score, box):
         """, (prediction_uid, label, score, str(box)))
 
 def upload_to_s3(file_path, s3_name,bucket, region):
-    s3 = boto3.client("s3", region_name=region)
-    s3.upload_file(file_path, bucket, s3_name)
+    s3 = boto3.client("s3", region_name=REGION_NAME)
+    s3.upload_file(file_path, BUCKET_NAME, s3_name)
 
 @app.get("/")
 def read_root():
@@ -92,9 +94,9 @@ async def predict_s3(request: Request):
     data = await request.json()
 
     image_name = data.get("image_name")
-    bucket_name = data.get("bucket_name")
-    region_name = data.get("region_name")
-    if not image_name or not bucket_name or not region_name:
+    bucket_name = data.get(BUCKET_NAME)
+    region_name = data.get(REGION_NAME)
+    if not image_name or not BUCKET_NAME or not REGION_NAME:
         raise HTTPException(status_code=400, detail="Missing required fields")
 
     try:
@@ -107,7 +109,7 @@ async def predict_s3(request: Request):
         predicted_path = os.path.join(PREDICTED_DIR, f"{uid}_predicted{ext}")
 
         # 1. הורדת התמונה המקורית מ־S3
-        download_from_s3(image_name, original_path, bucket_name, region_name)
+        download_from_s3(image_name, original_path, BUCKET_NAME, REGION_NAME)
 
         # 2. הרצת YOLO
         results = model(original_path, device="cpu")
@@ -129,7 +131,7 @@ async def predict_s3(request: Request):
 
         # 4. שמירת התמונה המסומנת ב־S3 עם שם ייחודי
         predicted_s3_key = f"predicted/{uid}_predicted{ext}"
-        upload_to_s3(predicted_path, predicted_s3_key, bucket_name, region_name)
+        upload_to_s3(predicted_path, predicted_s3_key, BUCKET_NAME, REGION_NAME)
 
         return {
             "prediction_uid": uid,
@@ -139,6 +141,9 @@ async def predict_s3(request: Request):
         }
 
     except Exception as e:
+        import traceback
+        traceback.print.exc()
+        print (f"[ERROR) {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to process image: {str(e)}")
 
 @app.get("/prediction/{uid}")
