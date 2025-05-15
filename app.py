@@ -21,8 +21,7 @@ BUCKET_NAME = "ameera-polybot-images"
 REGION_NAME = "eu-north-1"
 UPLOAD_DIR = "uploads/original"
 PREDICTED_DIR = "uploads/predicted"
-DB_PATH = "predictions.db"
-
+DB_PATH = os.path.join(os.path.dirname(__file__), "predictions.db")
 # Logging
 logging.basicConfig(level=logging.INFO)
 
@@ -79,11 +78,15 @@ def upload_to_s3(file_path, s3_key):
 
 # DB saves
 def save_prediction_session(uid, original_image, predicted_image):
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            INSERT OR IGNORE INTO prediction_sessions (uid, original_image, predicted_image)
-            VALUES (?, ?, ?)
-        """, (uid, original_image, predicted_image))
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("""
+                INSERT INTO prediction_sessions (uid, original_image, predicted_image)
+                VALUES (?, ?, ?)
+            """, (uid, original_image, predicted_image))
+        print(f"[DEBUG] Saved to DB: {uid}")
+    except Exception as e:
+        print(f"[ERROR] Failed to save to DB: {e}")
 
 def save_detection_object(prediction_uid, label, score, box):
     with sqlite3.connect(DB_PATH) as conn:
@@ -96,6 +99,18 @@ def save_detection_object(prediction_uid, label, score, box):
 def read_root():
     return {"message": "Welcome!"}
 
+@app.get("/predictions/score/{min_score}")
+def get_predictions_by_score(min_score: float):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("""
+            SELECT DISTINCT ps.uid, ps.timestamp
+            FROM prediction_sessions ps
+            JOIN detection_objects do ON ps.uid = do.prediction_uid
+            WHERE do.score >= ?
+        """, (min_score,)).fetchall()
+
+        return [{"uid": row["uid"], "timestamp": row["timestamp"]} for row in rows]
 
 
 @app.post("/predict")
@@ -113,10 +128,14 @@ async def predict_s3(request: Request):
 
         # יצירת UID ושמות קבצים
         uid = str(uuid.uuid4())
-        ext = os.path.splitext(image_name)[1]
-        base_name = os.path.splitext(image_name)[0]
+        print(f"[DEBUG] Generated UID: {uid}")
+        with sqlite3.connect(DB_PATH) as conn:
+            result = conn.execute("SELECT * FROM prediction_sessions WHERE uid = ?", (uid,)).fetchone()
+            print("[DEBUG] Retrieved from DB:", result)
+        base_name , ext= os.path.splitext(os.path.basename(image_name))
         original_path = os.path.join(UPLOAD_DIR, f"{uid}{ext}")
-        predicted_path = os.path.join(PREDICTED_DIR, f"{uid}_predicted{ext}")
+        predicted_name=f"{base_name}_predicted{ext}"
+        predicted_path = os.path.join(PREDICTED_DIR, predicted_name)
 
         # שלב 2: הורדת התמונה מ־S3
         print("[INFO] Downloading image from S3...")
@@ -144,12 +163,14 @@ async def predict_s3(request: Request):
 
         # שלב 5: העלאה חזרה ל־S3
         print("[INFO] Uploading predicted image to S3...")
-        predicted_s3_key = f"predicted/{uid}_predicted{ext}"
+        predicted_s3_key = f"predicted/{predicted_name}"
         upload_to_s3(predicted_path, predicted_s3_key)
 
         print("[INFO] Prediction completed successfully.")
         return {
             "prediction_uid": uid,
+            "original_image":image_name,
+            "predicted_image":predicted_name,
             "detection_count": len(detected_labels),
             "labels": detected_labels,
             "predicted_s3_key": predicted_s3_key
