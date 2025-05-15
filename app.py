@@ -54,9 +54,8 @@ def init_db():
 
 init_db()
 
-def download_from_s3(image_name, local_path):
-    s3 = boto3.client("s3")
-    bucket = "ameera-polybot-images"  # תוודאי שזה השם שלך
+def download_from_s3(image_name, local_path,bucket,region):
+    s3 = boto3.client("s3",region_name=region)
     s3.download_file(bucket, image_name, local_path)
 
 def save_prediction_session(uid, original_image, predicted_image):
@@ -79,9 +78,8 @@ def save_detection_object(prediction_uid, label, score, box):
             VALUES (?, ?, ?, ?)
         """, (prediction_uid, label, score, str(box)))
 
-def upload_to_s3(file_path, s3_name):
-    s3 = boto3.client("s3")
-    bucket = "ameera-polybot-images"
+def upload_to_s3(file_path, s3_name,bucket, region):
+    s3 = boto3.client("s3", region_name=region)
     s3.upload_file(file_path, bucket, s3_name)
 
 @app.get("/")
@@ -92,26 +90,30 @@ async def predict_s3(request: Request):
     try:
         data = await request.json()
         image_name = data.get("image_name")
-        if not image_name:
-            raise HTTPException(status_code=400, detail="Missing image_name")
+        bucket_name = data.get("bucket_name")
+        region_name = data.get("region_name")
+
+        if not image_name or not bucket_name or not region_name:
+            raise HTTPException(status_code=400, detail="Missing required fields")
 
         uid = str(uuid.uuid4())
         ext = os.path.splitext(image_name)[1]
-        original_path = os.path.join(UPLOAD_DIR, uid + ext)
-        predicted_path = os.path.join(PREDICTED_DIR, uid + ext)
+        base_name = os.path.splitext(image_name)[0]
 
-        # שלב 1: הורדת התמונה מה־S3
-        download_from_s3(image_name, original_path)
+        # קבצים מקומיים עם uid
+        original_path = os.path.join(UPLOAD_DIR, f"{uid}{ext}")
+        predicted_path = os.path.join(PREDICTED_DIR, f"{uid}_predicted{ext}")
 
-        # שלב 2: הרצת YOLO על התמונה
+        # 1. הורדת התמונה המקורית מ־S3
+        download_from_s3(image_name, original_path, bucket_name, region_name)
+
+        # 2. הרצת YOLO
         results = model(original_path, device="cpu")
         annotated_frame = results[0].plot()
         annotated_image = Image.fromarray(annotated_frame)
         annotated_image.save(predicted_path)
-        # Save the predicted image to S3 with new name
-        predicted_s3_key = f"{uid}_predicted{ext}"
-        upload_to_s3(predicted_path, predicted_s3_key)
-        # שלב 3: שמירה במסד נתונים
+
+        # 3. שמירה במסד נתונים
         save_prediction_session(uid, original_path, predicted_path)
 
         detected_labels = []
@@ -123,9 +125,13 @@ async def predict_s3(request: Request):
             save_detection_object(uid, label, score, bbox)
             detected_labels.append(label)
 
+        # 4. שמירת התמונה המסומנת ב־S3 עם שם ייחודי
+        predicted_s3_key = f"predicted/{uid}_predicted{ext}"
+        upload_to_s3(predicted_path, predicted_s3_key, bucket_name, region_name)
+
         return {
             "prediction_uid": uid,
-            "detection_count": len(results[0].boxes),
+            "detection_count": len(detected_labels),
             "labels": detected_labels,
             "predicted_s3_key": predicted_s3_key
         }
