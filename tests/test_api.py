@@ -17,9 +17,7 @@ def test_homepage():
 
 def test_predict_success():
     response = client.post("/predict", json={
-        "image_name": "file_53.jpg",
-        "bucket_name": "ameera-polybot-images",
-        "region_name": "eu-north-1"
+        "image_name": "file_53.jpg"
     })
     assert response.status_code == 200
     assert "message" not in response.json()
