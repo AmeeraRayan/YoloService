@@ -94,9 +94,7 @@ async def predict_s3(request: Request):
     data = await request.json()
 
     image_name = data.get("image_name")
-    bucket_name = data.get(BUCKET_NAME)
-    region_name = data.get(REGION_NAME)
-    if not image_name or not BUCKET_NAME or not REGION_NAME:
+    if not image_name :
         raise HTTPException(status_code=400, detail="Missing required fields")
 
     try:
