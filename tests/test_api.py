@@ -49,3 +49,13 @@ def test_predict_response_structure():
 
     assert "predicted_s3_key" in data
     assert data["predicted_s3_key"].endswith("_predicted.jpg")
+
+def test_get_predictions_by_score():
+    # נניח שיש לפחות תוצאה אחת עם score מעל 0.1
+    response = client.get("/predictions/score/0.1")
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+    # אם קיימות תוצאות, נבדוק שיש להן שדות uid ו־timestamp
+    if response.json():
+        assert "uid" in response.json()[0]
+        assert "timestamp" in response.json()[0]
