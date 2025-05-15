@@ -10,7 +10,6 @@ import boto3
 # Disable GPU usage
 import torch
 torch.cuda.is_available = lambda: False
-
 app = FastAPI()
 
 UPLOAD_DIR = "uploads/original"
@@ -21,7 +20,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(PREDICTED_DIR, exist_ok=True)
 
 # Download the AI model (tiny model ~6MB)
-model = YOLO("yolov8n.pt")  
+model = YOLO("yolov8n.pt")
 
 # Initialize SQLite
 def init_db():
@@ -35,7 +34,7 @@ def init_db():
                 predicted_image TEXT
             )
         """)
-        
+
         # Create the objects table to store individual detected objects in a given image
         conn.execute("""
             CREATE TABLE IF NOT EXISTS detection_objects (
@@ -47,7 +46,7 @@ def init_db():
                 FOREIGN KEY (prediction_uid) REFERENCES prediction_sessions (uid)
             )
         """)
-        
+
         # Create index for faster queries
         conn.execute("CREATE INDEX IF NOT EXISTS idx_prediction_uid ON detection_objects (prediction_uid)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_label ON detection_objects (label)")
@@ -80,6 +79,11 @@ def save_detection_object(prediction_uid, label, score, box):
             VALUES (?, ?, ?, ?)
         """, (prediction_uid, label, score, str(box)))
 
+def upload_to_s3(file_path, s3_name):
+    s3 = boto3.client("s3")
+    bucket = "ameera-polybot-images"
+    s3.upload_file(file_path, bucket, s3_name)
+
 @app.get("/")
 def read_root():
     return {"message": "Welcome!"}
@@ -104,7 +108,9 @@ async def predict_s3(request: Request):
         annotated_frame = results[0].plot()
         annotated_image = Image.fromarray(annotated_frame)
         annotated_image.save(predicted_path)
-
+        # Save the predicted image to S3 with new name
+        predicted_s3_key = f"{uid}_predicted{ext}"
+        upload_to_s3(predicted_path, predicted_s3_key)
         # שלב 3: שמירה במסד נתונים
         save_prediction_session(uid, original_path, predicted_path)
 
@@ -120,7 +126,8 @@ async def predict_s3(request: Request):
         return {
             "prediction_uid": uid,
             "detection_count": len(results[0].boxes),
-            "labels": detected_labels
+            "labels": detected_labels,
+            "predicted_s3_key": predicted_s3_key
         }
 
     except Exception as e:
@@ -137,13 +144,13 @@ def get_prediction_by_uid(uid: str):
         session = conn.execute("SELECT * FROM prediction_sessions WHERE uid = ?", (uid,)).fetchone()
         if not session:
             raise HTTPException(status_code=404, detail="Prediction not found")
-            
+
         # Get all detection objects for this prediction
         objects = conn.execute(
-            "SELECT * FROM detection_objects WHERE prediction_uid = ?", 
+            "SELECT * FROM detection_objects WHERE prediction_uid = ?",
             (uid,)
         ).fetchall()
-        
+
         return {
             "uid": session["uid"],
             "timestamp": session["timestamp"],
@@ -172,7 +179,7 @@ def get_predictions_by_label(label: str):
             JOIN detection_objects do ON ps.uid = do.prediction_uid
             WHERE do.label = ?
         """, (label,)).fetchall()
-        
+
         return [{"uid": row["uid"], "timestamp": row["timestamp"]} for row in rows]
 
 @app.get("/predictions/score/{min_score}")
@@ -188,7 +195,7 @@ def get_predictions_by_score(min_score: float):
             JOIN detection_objects do ON ps.uid = do.prediction_uid
             WHERE do.score >= ?
         """, (min_score,)).fetchall()
-        
+
         return [{"uid": row["uid"], "timestamp": row["timestamp"]} for row in rows]
 
 @app.get("/image/{type}/{filename}")
