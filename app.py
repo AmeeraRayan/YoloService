@@ -64,7 +64,7 @@ def generate_uid(image_name):
     return str(uuid.uuid5(namespace, base_name))
 
 # S3
-def download_from_s3(image_name, local_path , bucket_name , region_name):
+def download_from_s3(image_name, local_path ,bucket_name ,region_name):
     logging.info(f"Downloading {image_name} from S3...")
     s3 = boto3.client("s3", region_name=region_name)
     s3.download_file(bucket_name, image_name, local_path)
