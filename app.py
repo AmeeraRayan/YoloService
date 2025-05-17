@@ -17,8 +17,6 @@ torch.cuda.is_available = lambda: False
 app = FastAPI()
 
 # Constants
-BUCKET_NAME = "ameera-polybot-images"
-REGION_NAME = "eu-north-1"
 UPLOAD_DIR = "uploads/original"
 PREDICTED_DIR = "uploads/predicted"
 DB_PATH = os.path.join(os.path.dirname(__file__), "predictions.db")
@@ -66,15 +64,15 @@ def generate_uid(image_name):
     return str(uuid.uuid5(namespace, base_name))
 
 # S3
-def download_from_s3(image_name, local_path):
+def download_from_s3(image_name, local_path , bucket_name , region_name):
     logging.info(f"Downloading {image_name} from S3...")
-    s3 = boto3.client("s3", region_name=REGION_NAME)
-    s3.download_file(BUCKET_NAME, image_name, local_path)
+    s3 = boto3.client("s3", region_name=region_name)
+    s3.download_file(bucket_name, image_name, local_path)
 
-def upload_to_s3(file_path, s3_key):
+def upload_to_s3(file_path, s3_key,bucket_name,region_name):
     logging.info(f"Uploading {file_path} to S3 key: {s3_key}")
-    s3 = boto3.client("s3", region_name=REGION_NAME)
-    s3.upload_file(file_path, BUCKET_NAME, s3_key)
+    s3 = boto3.client("s3", region_name=region_name)
+    s3.upload_file(file_path, bucket_name, s3_key)
 
 # DB saves
 def save_prediction_session(uid, original_image, predicted_image):
@@ -117,9 +115,11 @@ def get_predictions_by_score(min_score: float):
 async def predict_s3(request: Request):
     data = await request.json()
     image_name = data.get("image_name")
+    bucket_name = data.get("bucket_name")
+    region_name = data.get("region_name")
 
     # שלב 1: בדיקת שדות חובה
-    if not image_name:
+    if not image_name or bucket_name or region_name:
         print("[ERROR] Missing image_name in request")
         raise HTTPException(status_code=400, detail="Missing image_name")
 
@@ -139,7 +139,7 @@ async def predict_s3(request: Request):
 
         # שלב 2: הורדת התמונה מ־S3
         print("[INFO] Downloading image from S3...")
-        download_from_s3(image_name, original_path)
+        download_from_s3(image_name, original_path, bucket_name,region_name)
 
         # שלב 3: הרצת YOLO
         print("[INFO] Running YOLO model...")
@@ -164,7 +164,7 @@ async def predict_s3(request: Request):
         # שלב 5: העלאה חזרה ל־S3
         print("[INFO] Uploading predicted image to S3...")
         predicted_s3_key = f"predicted/{predicted_name}"
-        upload_to_s3(predicted_path, predicted_s3_key)
+        upload_to_s3(predicted_path, predicted_s3_key , bucket_name,region_name)
 
         print("[INFO] Prediction completed successfully.")
         return {
