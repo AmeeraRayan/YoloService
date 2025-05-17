@@ -1,0 +1,49 @@
+name: Yolo Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - feature/user_images_upload_to_s3
+  workflow_dispatch:
+
+env:
+  REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+  REPO_NAME: ${{ github.event.repository.name }}
+
+jobs:
+  Deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/private_key
+          chmod 600 ~/.ssh/private_key
+          cat > ~/.ssh/config << EOF
+          Host ec2
+            HostName $EC2_HOST
+            User $EC2_USERNAME
+            IdentityFile ~/.ssh/private_key
+            StrictHostKeyChecking no
+          EOF
+
+      - name: Copy script to EC2
+        run: |
+          ssh ec2 "if [ -d ~/${REPO_NAME} ]; then cd ~/${REPO_NAME} && git pull; else git clone --branch feature/user_images_upload_to_s3 ${REPO_URL} ~/${REPO_NAME}; fi"
+          scp deploy.sh yolo.service ec2:~/${REPO_NAME}/
+
+      - name: Execute script on EC2
+        run: |
+          ssh ec2 "cd ~/${REPO_NAME} && ls -la && bash deploy.sh"
+      - name: Debug EC2 files
+        run: |
+          ssh ec2 "cd ~/${REPO_NAME} && ls -la && cat deploy.sh"
