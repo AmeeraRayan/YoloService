@@ -119,7 +119,7 @@ async def predict_s3(request: Request):
     region_name = data.get("region_name")
 
     # שלב 1: בדיקת שדות חובה
-    if not image_name or bucket_name or region_name:
+    if not image_name or not bucket_name or not region_name:
         print("[ERROR] Missing image_name in request")
         raise HTTPException(status_code=400, detail="Missing image_name")
 
