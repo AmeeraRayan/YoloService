@@ -11,11 +11,7 @@ import boto3
 import traceback
 import logging
 import torch
-DEFAULT_BUCKET = os.environ.get("BUCKET_NAME")
-DEFAULT_REGION = os.environ.get("AWS_REGION")
 
-if not DEFAULT_BUCKET or not DEFAULT_REGION:
-    raise RuntimeError("Missing required environment variables: BUCKET_NAME or AWS_REGION")
 torch.cuda.is_available = lambda: False
 
 app = FastAPI()
@@ -119,8 +115,8 @@ def get_predictions_by_score(min_score: float):
 async def predict_s3(request: Request):
     data = await request.json()
     image_name = data.get("image_name")
-    bucket_name = data.get("bucket_name", DEFAULT_BUCKET)
-    region_name = data.get("region_name" , DEFAULT_REGION)
+    bucket_name = data.get("bucket_name")
+    region_name = data.get("region_name")
 
     # שלב 1: בדיקת שדות חובה
     if not image_name or not bucket_name or not region_name:

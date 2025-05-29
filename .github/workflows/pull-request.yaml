@@ -8,10 +8,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-
-    env:
-      BUCKET_NAME: ameera-polybot-images
-      AWS_REGION: eu-north-1
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
