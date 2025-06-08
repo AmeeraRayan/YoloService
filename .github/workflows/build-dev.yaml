@@ -1,0 +1,36 @@
+name: YoloService Build Dev
+
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  Build:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.docker_build.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and Push Docker Image
+        id: docker_build
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          docker login -u "$DOCKER_USERNAME" -p "$DOCKER_PASSWORD"
+          IMAGE_NAME=${DOCKER_USERNAME}/yoloservice-dev:${{ github.run_number }}
+          echo "image=$IMAGE_NAME" >> $GITHUB_OUTPUT
+          docker build -t $IMAGE_NAME .
+          docker push $IMAGE_NAME
+
+  Deploy:
+    needs: Build
+    uses: ./.github/workflows/deploy-dev.yaml
+    with:
+      image: ${{ needs.Build.outputs.image }}
+    secrets:
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      EC2_HOST_DEV: ${{ secrets.EC2_HOST_DEV }}
+      EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
