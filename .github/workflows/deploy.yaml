@@ -1,11 +1,18 @@
-name: Yolo Deploy
+name: YoloService Deploy Prod
 
 on:
-  push:
-    branches:
-      - main
-      - feature/user_images_upload_to_s3
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      image:
+        required: true
+        type: string
+    secrets:
+      SSH_PRIVATE_KEY:
+        required: true
+      EC2_HOST:
+        required: true
+      EC2_USERNAME:
+        required: true
 
 env:
   REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
@@ -36,14 +43,30 @@ jobs:
             StrictHostKeyChecking no
           EOF
 
-      - name: Copy script to EC2
+      - name: Copy repo to EC2
         run: |
-          ssh ec2 "if [ -d ~/${REPO_NAME} ]; then cd ~/${REPO_NAME} && git pull; else git clone --branch feature/user_images_upload_to_s3 ${REPO_URL} ~/${REPO_NAME}; fi"
-          scp deploy.sh yolo.service ec2:~/${REPO_NAME}/
+          ssh ec2 "
+            if [ -d ~/${REPO_NAME} ]; then
+              cd ~/${REPO_NAME}
+              git reset --hard HEAD
+              git clean -fd
+              git pull
+            else
+              git clone ${REPO_URL} ~/${REPO_NAME}
+            fi
+          "
+          scp docker-compose.prod.yaml ec2:~/${REPO_NAME}/docker-compose.prod.yaml
 
-      - name: Execute script on EC2
+      - name: Deploy with Docker Compose
+        env:
+          IMG_NAME: ${{ inputs.image }}
         run: |
-          ssh ec2 "cd ~/${REPO_NAME} && ls -la && bash deploy.sh"
-      - name: Debug EC2 files
-        run: |
-          ssh ec2 "cd ~/${REPO_NAME} && ls -la && cat deploy.sh"
+          ssh ec2 "
+            cd ~/${REPO_NAME}
+            cat > .env <<EOF
+              IMG_NAME=${{ inputs.image }}
+            EOF
+            docker compose -f docker-compose.prod.yaml down || true
+            docker compose -f docker-compose.prod.yaml pull
+            docker compose -f docker-compose.prod.yaml up -d
+          "

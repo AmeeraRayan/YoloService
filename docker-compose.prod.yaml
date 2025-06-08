@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  yoloservice:
+    image: ${IMG_NAME}  # Image from GitHub Actions
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    restart: always
+
+  otelcol:
+    image: otel/opentelemetry-collector-contrib:latest
+    ports:
+      - "8889:8889"
+    volumes:
+      - ./otelcol-config.yaml:/etc/otelcol/config.yaml
+      - /proc:/hostfs/proc:ro
+      - /sys:/hostfs/sys:ro
+    environment:
+      - HOST_PROC=/hostfs/proc
+      - HOST_SYS=/hostfs/sys
+    network_mode: host
