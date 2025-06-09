@@ -66,9 +66,9 @@ jobs:
       run: |
         ssh ec2 "
           cd ~/${REPO_NAME}
-          cat > .env <<EOF
+          echo \"\"\" 
             IMG_NAME=${{ secrets.DOCKERHUB_USERNAME }}/yoloservice-dev:${{ github.run_number }}
-          EOF
+          \"\"\" > .env
           docker compose -f docker-compose.dev.yaml down || true
           docker compose -f docker-compose.dev.yaml pull
           docker compose -f docker-compose.dev.yaml up -d
