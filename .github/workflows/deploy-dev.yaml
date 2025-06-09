@@ -13,6 +13,8 @@ on:
         required: true
       EC2_USERNAME:
         required: true
+      DOCKERHUB_USERNAME: # ✅ NEW LINE [added line 20]
+        required: true
 
 env:
   REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
@@ -64,12 +66,12 @@ jobs:
 
     - name: Deploy with Docker Compose
       env:
-        IMG_NAME: ${{ inputs.image }}
+        DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       run: |
         ssh ec2 "
           cd ~/${REPO_NAME}
           cat > .env <<EOF
-            IMG_NAME=${{ inputs.image }}
+            IMG_NAME=${{ secrets.DOCKERHUB_USERNAME }}/yoloservice-dev:${{ github.run_number }}
           EOF
           docker compose -f docker-compose.dev.yaml down || true
           docker compose -f docker-compose.dev.yaml pull
