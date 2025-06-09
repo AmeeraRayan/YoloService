@@ -2,10 +2,6 @@ name: YoloService Deploy Dev
 
 on:
   workflow_call:
-    inputs:
-      image:
-        required: true
-        type: string
     secrets:
       SSH_PRIVATE_KEY:
         required: true
