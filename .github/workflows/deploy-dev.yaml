@@ -1,10 +1,16 @@
-name: Deploy to Yolo Dev
+name: YoloService Deploy Dev
 
 on:
-  push:
-    branches:
-      - dev
-  workflow_dispatch:
+  workflow_call:
+    secrets:
+      SSH_PRIVATE_KEY:
+        required: true
+      EC2_HOST_DEV:
+        required: true
+      EC2_USERNAME:
+        required: true
+      DOCKERHUB_USERNAME: # ✅ NEW LINE [added line 20]
+        required: true
 
 env:
   REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
@@ -15,31 +21,55 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Configure SSH
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          EC2_HOST_DEV: ${{ secrets.EC2_HOST_DEV }}
-          EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
-        run: |
-          mkdir -p ~/.ssh
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/private_key
-          chmod 600 ~/.ssh/private_key
-          cat > ~/.ssh/config << EOF
-          Host ec2
-            HostName $EC2_HOST
-            User $EC2_USERNAME
-            IdentityFile ~/.ssh/private_key
-            StrictHostKeyChecking no
-          EOF
+    - name: Configure SSH
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        EC2_HOST_DEV: ${{ secrets.EC2_HOST_DEV }}
+        EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
+      run: |
+        mkdir -p ~/.ssh
+        echo "$SSH_PRIVATE_KEY" > ~/.ssh/private_key
+        chmod 600 ~/.ssh/private_key
+        cat > ~/.ssh/config << EOF
+        Host ec2
+          HostName $EC2_HOST_DEV
+          User $EC2_USERNAME
+          IdentityFile ~/.ssh/private_key
+          StrictHostKeyChecking no
+        EOF
 
-      - name: Clone or update repo on EC2
-        run: |
-          ssh ec2 "if [ -d ~/${REPO_NAME} ]; then cd ~/${REPO_NAME} && git pull; else git clone --branch dev ${REPO_URL} ~/${REPO_NAME}; fi"
-          scp deploy-dev.sh yolo-dev.service ec2:~/${REPO_NAME}/
+    - name: Print debug values (no secrets)
+      run: |
+        echo "HOST: '${{ secrets.EC2_HOST_DEV }}'"
+        echo "USERNAME: '${{ secrets.EC2_USERNAME }}'"
 
-      - name: Run deploy script
-        run: |
-          ssh ec2 "cd ~/${REPO_NAME} && bash deploy-dev.sh"
+    - name: Copy repo to EC2
+      run: |
+        ssh ec2 "
+          if [ -d ~/${REPO_NAME} ]; then
+            cd ~/${REPO_NAME}
+            git reset --hard HEAD
+            git clean -fd
+            git pull
+          else
+            git clone ${REPO_URL} ~/${REPO_NAME}
+          fi
+        "
+        scp docker-compose.dev.yaml ec2:~/${REPO_NAME}/docker-compose.dev.yaml
+
+    - name: Deploy with Docker Compose
+      env:
+        DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      run: |
+        ssh ec2 "
+          cd ~/${REPO_NAME}
+          echo \"\"\" 
+            IMG_NAME=${{ secrets.DOCKERHUB_USERNAME }}/yoloservice-dev:${{ github.run_number }}
+          \"\"\" > .env
+          docker compose -f docker-compose.dev.yaml down || true
+          docker compose -f docker-compose.dev.yaml pull
+          docker compose -f docker-compose.dev.yaml up -d
+        "
