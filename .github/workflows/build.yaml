@@ -28,9 +28,8 @@ jobs:
   Deploy:
     needs: Build
     uses: ./.github/workflows/deploy.yaml
-    with:
-      image: ${{ needs.Build.outputs.image }}
     secrets:
       SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
       EC2_HOST: ${{ secrets.EC2_HOST }}
       EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}  # ✅ ADD THIS LINE
