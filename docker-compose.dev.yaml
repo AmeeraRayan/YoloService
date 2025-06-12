@@ -21,3 +21,4 @@ services:
       - HOST_PROC=/hostfs/proc
       - HOST_SYS=/hostfs/sys
     network_mode: host
+    command: ["--config=/etc/otelcol/config.yaml"]
