@@ -1,5 +1,0 @@
-.venv
-venv/
-*.db
-*.pt
-uploads/
