@@ -51,5 +51,5 @@ def consume_messages():
             print("❌ Consumer error:", e)
             time.sleep(5)
 
-if __name__ == "main":
+if __name__ == "__main__":
     consume_messages()

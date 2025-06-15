@@ -13,6 +13,7 @@ services:
     image: otel/opentelemetry-collector-contrib:latest
     ports:
       - "8889:8889"
+    restart: always
     volumes:
       - ./otelcol-config.yaml:/etc/otelcol/config.yaml
       - /proc:/hostfs/proc:ro
