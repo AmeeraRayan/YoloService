@@ -125,7 +125,7 @@ async def predict_s3(request: Request):
                 score = Decimal(str(score_val))  # convert to valid Decimal
             except (ValueError, InvalidOperation):
                 score = Decimal("0.0")  # fallback if broken
-            bbox = box.xyxy[0].tolist()
+            bbox = [Decimal(str(coord)) for coord in box.xyxy[0].tolist()]
             storage.save_detection(uid, label, score, bbox)
             detected_labels.append(label)
 
