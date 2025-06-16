@@ -164,6 +164,7 @@ async def predict_s3(request: Request):
             save_detection_object(uid, label, score, bbox)
             detected_labels.append(label)
 
+        print("🧠 Detected objects:", ", ".join(detected_labels))  #
         # שלב 5: העלאה חזרה ל־S3
         print("[INFO] Uploading predicted image to S3...")
         predicted_s3_key = f"predicted/{predicted_name}"
