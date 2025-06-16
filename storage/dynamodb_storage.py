@@ -17,9 +17,10 @@ class DynamoDBStorage(Storage):
             "original_path": original_path,
             "predicted_path": predicted_path,
             "created_at": datetime.utcnow().isoformat(),
-            "detections": [] , # initialize empty list to add detections later
-            "chat_id": chat_id
+            "detections": [] # initialize empty list to add detections later
         }
+        if chat_id:
+            item["chat_id"] = str(chat_id)  # Always store as string
         self.table.put_item(Item=item)
         print(f"[DynamoDB] Saved prediction for UID: {uid}")
 
