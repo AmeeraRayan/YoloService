@@ -11,15 +11,30 @@ import boto3
 import traceback
 import logging
 import torch
-
+import threading
+import json
+import time
+import requests
+from decimal import Decimal , InvalidOperation
 torch.cuda.is_available = lambda: False
+from storage.base import Storage
+from storage.sqlite_storage import SQLiteStorage
+from storage.dynamodb_storage import DynamoDBStorage  # for future
 
 app = FastAPI()
 
+POLYBOT_URL = os.getenv("POLYBOT_URL")  # e.g., http://10.0.0.164:8443
+# Select storage backend
+storage_type = os.getenv("STORAGE_TYPE", "sqlite")
+if storage_type == "dynamodb":
+    from storage.dynamodb_storage import DynamoDBStorage
+    storage = DynamoDBStorage()
+else:
+    storage = SQLiteStorage()
+print("[INFO] Using DynamoDBStorage" if storage_type == "dynamodb" else "[INFO] Using SQLiteStorage")
 # Constants
 UPLOAD_DIR = "uploads/original"
 PREDICTED_DIR = "uploads/predicted"
-DB_PATH = os.path.join(os.path.dirname(__file__), "predictions.db")
 # Logging
 logging.basicConfig(level=logging.INFO)
 
@@ -29,33 +44,6 @@ os.makedirs(PREDICTED_DIR, exist_ok=True)
 
 # Load model
 model = YOLO("yolov8n.pt")
-
-# Initialize DB
-def init_db():
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS prediction_sessions (
-                uid TEXT PRIMARY KEY,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                original_image TEXT,
-                predicted_image TEXT
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS detection_objects (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                prediction_uid TEXT,
-                label TEXT,
-                score REAL,
-                box TEXT,
-                FOREIGN KEY (prediction_uid) REFERENCES prediction_sessions (uid)
-            )
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_prediction_uid ON detection_objects (prediction_uid)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_label ON detection_objects (label)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_score ON detection_objects (score)")
-
-init_db()
 
 # UID from image name
 def generate_uid(image_name):
@@ -74,41 +62,20 @@ def upload_to_s3(file_path, s3_key,bucket_name,region_name):
     s3 = boto3.client("s3", region_name=region_name)
     s3.upload_file(file_path, bucket_name, s3_key)
 
-# DB saves
-def save_prediction_session(uid, original_image, predicted_image):
-    try:
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("""
-                INSERT INTO prediction_sessions (uid, original_image, predicted_image)
-                VALUES (?, ?, ?)
-            """, (uid, original_image, predicted_image))
-        print(f"[DEBUG] Saved to DB: {uid}")
-    except Exception as e:
-        print(f"[ERROR] Failed to save to DB: {e}")
-
-def save_detection_object(prediction_uid, label, score, box):
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            INSERT INTO detection_objects (prediction_uid, label, score, box)
-            VALUES (?, ?, ?, ?)
-        """, (prediction_uid, label, score, str(box)))
-
 @app.get("/")
 def read_root():
     return {"message": "Welcome!"}
 
 @app.get("/predictions/score/{min_score}")
 def get_predictions_by_score(min_score: float):
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute("""
-            SELECT DISTINCT ps.uid, ps.timestamp
-            FROM prediction_sessions ps
-            JOIN detection_objects do ON ps.uid = do.prediction_uid
-            WHERE do.score >= ?
-        """, (min_score,)).fetchall()
+    return storage.get_predictions_by_score(min_score)
 
-        return [{"uid": row["uid"], "timestamp": row["timestamp"]} for row in rows]
+@app.get("/predictions/{uid}")
+def get_prediction(uid: str):
+    result = storage.get_prediction(uid)
+    if result:
+        return result
+    raise HTTPException(status_code=404, detail="Prediction not found")
 
 
 @app.post("/predict")
@@ -117,6 +84,7 @@ async def predict_s3(request: Request):
     image_name = data.get("image_name")
     bucket_name = data.get("bucket_name")
     region_name = data.get("region_name")
+    chat_id = data.get("chat_id")  # ✅ Receive chat_id
 
     # שלב 1: בדיקת שדות חובה
     if not image_name or not bucket_name or not region_name:
@@ -129,9 +97,6 @@ async def predict_s3(request: Request):
         # יצירת UID ושמות קבצים
         uid = str(uuid.uuid4())
         print(f"[DEBUG] Generated UID: {uid}")
-        with sqlite3.connect(DB_PATH) as conn:
-            result = conn.execute("SELECT * FROM prediction_sessions WHERE uid = ?", (uid,)).fetchone()
-            print("[DEBUG] Retrieved from DB:", result)
         base_name , ext= os.path.splitext(os.path.basename(image_name))
         original_path = os.path.join(UPLOAD_DIR, f"{uid}{ext}")
         predicted_name=f"{base_name}_predicted{ext}"
@@ -150,23 +115,40 @@ async def predict_s3(request: Request):
 
         # שלב 4: שמירת המידע במסד נתונים
         print("[INFO] Saving prediction to database...")
-        save_prediction_session(uid, original_path, predicted_path)
+        storage.save_prediction(uid, original_path, predicted_path, chat_id)
 
         detected_labels = []
         for box in results[0].boxes:
             label_idx = int(box.cls[0].item())
             label = model.names[label_idx]
-            score = float(box.conf[0])
-            bbox = box.xyxy[0].tolist()
-            save_detection_object(uid, label, score, bbox)
+            # 👇 Safe conversion to Decimal
+            try:
+                score_val = float(box.conf[0])  # ensure it's a float
+                score = Decimal(str(score_val))  # convert to valid Decimal
+            except (ValueError, InvalidOperation):
+                score = Decimal("0.0")  # fallback if broken
+            bbox = [Decimal(str(coord)) for coord in box.xyxy[0].tolist()]
+            storage.save_detection(uid, label, score, bbox)
             detected_labels.append(label)
 
+        print("🧠 Detected objects:", ", ".join(detected_labels))  #
         # שלב 5: העלאה חזרה ל־S3
         print("[INFO] Uploading predicted image to S3...")
         predicted_s3_key = f"predicted/{predicted_name}"
         upload_to_s3(predicted_path, predicted_s3_key , bucket_name,region_name)
 
         print("[INFO] Prediction completed successfully.")
+        # 🧠 Step 6: Notify Polybot about the completed prediction
+        try:
+            if POLYBOT_URL:
+                print(f"[INFO] Notifying Polybot at {POLYBOT_URL}/predictions/{uid}")
+                r = requests.post(f"{POLYBOT_URL}/predictions/{uid}")
+                if r.status_code != 200:
+                    print(f"[WARN] Polybot responded with status {r.status_code}")
+            else:
+                print("[WARN] POLYBOT_URL not set — cannot notify Polybot.")
+        except Exception as e:
+            print(f"[ERROR] Failed to notify Polybot: {e}")
         return {
             "prediction_uid": uid,
             "original_image":image_name,
@@ -184,6 +166,57 @@ async def predict_s3(request: Request):
 def health():
     return {"status": "ok", "version": "1.0.1"}
 
+# 👇 Load these only once
+QUEUE_URL = os.environ.get("SQS_QUEUE_URL")
+YOLO_URL = "http://localhost:8000/predict"  # Since it's local to container
+REGION_NAME = "eu-north-1"
+
+def consume_messages():
+    sqs = boto3.client("sqs", region_name=REGION_NAME)
+    print(f"🟢 Listening to queue: {QUEUE_URL}")
+
+    while True:
+        try:
+            response = sqs.receive_message(
+                QueueUrl=QUEUE_URL,
+                MaxNumberOfMessages=5,
+                WaitTimeSeconds=10
+            )
+            messages = response.get("Messages", [])
+            if not messages:
+                print("🟡 No messages, waiting...")
+                time.sleep(1)
+                continue
+
+            for msg in messages:
+                body = json.loads(msg["Body"])
+                print(f"📥 Message received: {body}")
+                chat_id = body.get("chat_id")  # ✅ Extract chat_id if present
+
+                try:
+                    body["chat_id"] = chat_id  # Re-insert chat_id to ensure it's passed
+                    resp = requests.post(YOLO_URL, json=body)
+                    resp.raise_for_status()
+                    print("✅ YOLO processed the image:", resp.json())
+                except Exception as e:
+                    print("❌ Error calling YOLO:", e)
+
+                sqs.delete_message(
+                    QueueUrl=QUEUE_URL,
+                    ReceiptHandle=msg["ReceiptHandle"]
+                )
+                print("🗑️ Message deleted from SQS")
+
+        except Exception as e:
+            print("❌ Consumer error:", e)
+            time.sleep(5)
+
+# Start the background consumer when FastAPI starts
+@app.on_event("startup")
+def start_consumer_thread():
+    print("🚀 Starting SQS consumer in background thread...")
+    t = threading.Thread(target=consume_messages, daemon=True)
+    t.start()
 
 if __name__ == "__main__":
     import uvicorn

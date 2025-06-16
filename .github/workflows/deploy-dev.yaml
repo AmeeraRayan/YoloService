@@ -68,6 +68,11 @@ jobs:
           cd ~/${REPO_NAME}
           echo \"\"\" 
             IMG_NAME=${{ secrets.DOCKERHUB_USERNAME }}/yoloservice-dev:${{ github.run_number }}
+            SQS_QUEUE_URL=https://sqs.eu-north-1.amazonaws.com/228281126655/polybot-chat-messages
+            STORAGE_TYPE=dynamodb
+            AWS_REGION=eu-north-1
+            DYNAMODB_TABLE=Predictions
+            POLYBOT_URL=http://10.0.0.164:8443
           \"\"\" > .env
           docker compose -f docker-compose.dev.yaml down || true
           docker compose -f docker-compose.dev.yaml pull
