@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 from storage.base import Storage
 import json
-
+from decimal import Decimal
 class DynamoDBStorage(Storage):
     def __init__(self):
         self.table_name = os.getenv("DYNAMODB_TABLE", "Predictions")
@@ -26,7 +26,7 @@ class DynamoDBStorage(Storage):
         # Convert bbox to string or JSON-serializable format
         detection = {
             "label": label,
-            "score": score,
+            "score": Decimal(str(score)),
             "bbox": bbox
         }
 
