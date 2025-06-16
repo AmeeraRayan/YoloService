@@ -18,7 +18,8 @@ import requests
 torch.cuda.is_available = lambda: False
 from storage.base import Storage
 from storage.sqlite_storage import SQLiteStorage
-# from storage.dynamodb_storage import DynamoDBStorage  # for future
+from storage.dynamodb_storage import DynamoDBStorage  # for future
+
 app = FastAPI()
 
 # Select storage backend

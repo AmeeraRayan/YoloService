@@ -39,3 +39,22 @@ class DynamoDBStorage(Storage):
             }
         )
         print(f"[DynamoDB] Added detection for UID: {uid} -> {label} ({score:.2f})")
+
+    def get_prediction(self, uid):
+        try:
+            response = self.table.get_item(Key={'uid': uid})
+            item = response.get('Item')
+            if not item:
+                return None
+            return {
+                "prediction_uid": item.get("uid"),
+                "original_image": item.get("original_image"),
+                "predicted_image": item.get("predicted_image"),
+                "labels": json.loads(item.get("labels", "[]")),
+                "score": float(item.get("score", 0)),
+                "box": json.loads(item.get("box", "[]")),
+                "timestamp": item.get("timestamp")
+            }
+        except Exception as e:
+            print(f"[ERROR] get_prediction failed: {e}")
+            return None
