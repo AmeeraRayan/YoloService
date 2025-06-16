@@ -59,3 +59,29 @@ class DynamoDBStorage(Storage):
         except Exception as e:
             print(f"[ERROR] get_prediction failed: {e}")
             return None
+
+    def get_predictions_by_score(self, min_score: float):
+        min_score_decimal = Decimal(str(min_score))
+        try:
+            # Scan all items from the table
+            response = self.table.scan()
+            items = response.get("Items", [])
+
+            matched_predictions = []
+
+            for item in items:
+                detections = item.get("detections", [])
+                for detection in detections:
+                    score = Decimal(str(detection.get("score", 0)))
+                    if score >= min_score_decimal:
+                        matched_predictions.append({
+                            "uid": item["uid"],
+                            "timestamp": item.get("created_at") or item.get("timestamp")
+                        })
+                        break  # avoid adding same UID twice
+
+            return matched_predictions
+
+        except Exception as e:
+            print(f"[ERROR] get_predictions_by_score failed: {e}")
+            return []
