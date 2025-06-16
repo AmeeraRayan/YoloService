@@ -1,7 +1,7 @@
 import sqlite3
-from .base import BaseStorage
+from .base import Storage
 
-class SQLiteStorage(BaseStorage):
+class SQLiteStorage(Storage):
     def init(self, db_path):
         self.db_path = db_path
         self.init_db()
