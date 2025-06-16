@@ -15,7 +15,7 @@ import threading
 import json
 import time
 import requests
-from decimal import Decimal
+from decimal import Decimal , InvalidOperation
 torch.cuda.is_available = lambda: False
 from storage.base import Storage
 from storage.sqlite_storage import SQLiteStorage
@@ -119,7 +119,12 @@ async def predict_s3(request: Request):
         for box in results[0].boxes:
             label_idx = int(box.cls[0].item())
             label = model.names[label_idx]
-            score = Decimal(str(box.conf[0]))
+            # 👇 Safe conversion to Decimal
+            try:
+                score_val = float(box.conf[0])  # ensure it's a float
+                score = Decimal(str(score_val))  # convert to valid Decimal
+            except (ValueError, InvalidOperation):
+                score = Decimal("0.0")  # fallback if broken
             bbox = box.xyxy[0].tolist()
             storage.save_detection(uid, label, score, bbox)
             detected_labels.append(label)
