@@ -63,7 +63,7 @@ jobs:
             cd ~/${REPO_NAME}
             echo \"\"\" 
               IMG_NAME=${{ secrets.DOCKERHUB_USERNAME }}/yoloservice-prod:${{ github.run_number }}
-              SQS_QUEUE_URL=https://sqs.eu-north-1.amazonaws.com/228281126655/polybot-chat-messages
+              SQS_QUEUE_URL=https://sqs.eu-north-1.amazonaws.com/228281126655/polybot-chat-messages-prod
               STORAGE_TYPE=dynamodb
               AWS_REGION=eu-north-1
               DYNAMODB_TABLE=Predictions
