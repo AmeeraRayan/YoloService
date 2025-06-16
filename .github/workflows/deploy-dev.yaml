@@ -74,7 +74,6 @@ jobs:
             DYNAMODB_TABLE=Predictions
             POLYBOT_URL=http://10.0.0.164:8443
           \"\"\" > .env
-          docker compose -f docker-compose.dev.yaml down || true
-          docker compose -f docker-compose.dev.yaml pull
+  
           docker compose -f docker-compose.dev.yaml up -d
         "
