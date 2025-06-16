@@ -14,6 +14,7 @@ import torch
 import threading
 import json
 import time
+import requests
 torch.cuda.is_available = lambda: False
 
 app = FastAPI()
