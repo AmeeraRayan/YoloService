@@ -23,6 +23,7 @@ from storage.dynamodb_storage import DynamoDBStorage  # for future
 
 app = FastAPI()
 
+POLYBOT_URL = os.getenv("POLYBOT_URL")  # e.g., http://10.0.0.164:8443
 # Select storage backend
 storage_type = os.getenv("STORAGE_TYPE", "sqlite")
 if storage_type == "dynamodb":
@@ -83,6 +84,7 @@ async def predict_s3(request: Request):
     image_name = data.get("image_name")
     bucket_name = data.get("bucket_name")
     region_name = data.get("region_name")
+    chat_id = data.get("chat_id")  # ✅ Receive chat_id
 
     # שלב 1: בדיקת שדות חובה
     if not image_name or not bucket_name or not region_name:
@@ -113,7 +115,7 @@ async def predict_s3(request: Request):
 
         # שלב 4: שמירת המידע במסד נתונים
         print("[INFO] Saving prediction to database...")
-        storage.save_prediction(uid, original_path, predicted_path)
+        storage.save_prediction(uid, original_path, predicted_path, chat_id)
 
         detected_labels = []
         for box in results[0].boxes:
@@ -136,6 +138,17 @@ async def predict_s3(request: Request):
         upload_to_s3(predicted_path, predicted_s3_key , bucket_name,region_name)
 
         print("[INFO] Prediction completed successfully.")
+        # 🧠 Step 6: Notify Polybot about the completed prediction
+        try:
+            if POLYBOT_URL:
+                print(f"[INFO] Notifying Polybot at {POLYBOT_URL}/predictions/{uid}")
+                r = requests.post(f"{POLYBOT_URL}/predictions/{uid}")
+                if r.status_code != 200:
+                    print(f"[WARN] Polybot responded with status {r.status_code}")
+            else:
+                print("[WARN] POLYBOT_URL not set — cannot notify Polybot.")
+        except Exception as e:
+            print(f"[ERROR] Failed to notify Polybot: {e}")
         return {
             "prediction_uid": uid,
             "original_image":image_name,
@@ -178,8 +191,10 @@ def consume_messages():
             for msg in messages:
                 body = json.loads(msg["Body"])
                 print(f"📥 Message received: {body}")
+                chat_id = body.get("chat_id")  # ✅ Extract chat_id if present
 
                 try:
+                    body["chat_id"] = chat_id  # Re-insert chat_id to ensure it's passed
                     resp = requests.post(YOLO_URL, json=body)
                     resp.raise_for_status()
                     print("✅ YOLO processed the image:", resp.json())

@@ -11,13 +11,14 @@ class DynamoDBStorage(Storage):
         self.dynamodb = boto3.resource("dynamodb", region_name=self.region)
         self.table = self.dynamodb.Table(self.table_name)
 
-    def save_prediction(self, uid, original_path, predicted_path):
+    def save_prediction(self, uid, original_path, predicted_path, chat_id=None):
         item = {
             "uid": uid,
             "original_path": original_path,
             "predicted_path": predicted_path,
             "created_at": datetime.utcnow().isoformat(),
-            "detections": []  # initialize empty list to add detections later
+            "detections": [] , # initialize empty list to add detections later
+            "chat_id": chat_id
         }
         self.table.put_item(Item=item)
         print(f"[DynamoDB] Saved prediction for UID: {uid}")
@@ -54,7 +55,8 @@ class DynamoDBStorage(Storage):
                 "labels": json.loads(item.get("labels", "[]")),
                 "score": float(item.get("score", 0)),
                 "box": json.loads(item.get("box", "[]")),
-                "timestamp": item.get("timestamp")
+                "timestamp": item.get("timestamp"),
+                "chat_id":item.get("chat_id")
             }
         except Exception as e:
             print(f"[ERROR] get_prediction failed: {e}")
