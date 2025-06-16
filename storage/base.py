@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-class BaseStorage(ABC):
+class Storage(ABC):
     @abstractmethod
     def save_prediction(self, uid, original_image, predicted_image): pass
 
