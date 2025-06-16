@@ -11,7 +11,7 @@ import boto3
 import traceback
 import logging
 import torch
-
+import threading
 torch.cuda.is_available = lambda: False
 
 app = FastAPI()
