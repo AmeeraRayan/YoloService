@@ -16,13 +16,22 @@ import json
 import time
 import requests
 torch.cuda.is_available = lambda: False
-
+from storage.base import Storage
+from storage.sqlite_storage import SQLiteStorage
+# from storage.dynamodb_storage import DynamoDBStorage  # for future
 app = FastAPI()
 
+# Select storage backend
+storage_type = os.getenv("STORAGE_TYPE", "sqlite")
+if storage_type == "dynamodb":
+    from storage.dynamodb_storage import DynamoDBStorage
+    storage = DynamoDBStorage()
+else:
+    storage = SQLiteStorage()
+print("[INFO] Using DynamoDBStorage" if storage_type == "dynamodb" else "[INFO] Using SQLiteStorage")
 # Constants
 UPLOAD_DIR = "uploads/original"
 PREDICTED_DIR = "uploads/predicted"
-DB_PATH = os.path.join(os.path.dirname(__file__), "predictions.db")
 # Logging
 logging.basicConfig(level=logging.INFO)
 
@@ -32,33 +41,6 @@ os.makedirs(PREDICTED_DIR, exist_ok=True)
 
 # Load model
 model = YOLO("yolov8n.pt")
-
-# Initialize DB
-def init_db():
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS prediction_sessions (
-                uid TEXT PRIMARY KEY,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                original_image TEXT,
-                predicted_image TEXT
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS detection_objects (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                prediction_uid TEXT,
-                label TEXT,
-                score REAL,
-                box TEXT,
-                FOREIGN KEY (prediction_uid) REFERENCES prediction_sessions (uid)
-            )
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_prediction_uid ON detection_objects (prediction_uid)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_label ON detection_objects (label)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_score ON detection_objects (score)")
-
-init_db()
 
 # UID from image name
 def generate_uid(image_name):
@@ -77,41 +59,20 @@ def upload_to_s3(file_path, s3_key,bucket_name,region_name):
     s3 = boto3.client("s3", region_name=region_name)
     s3.upload_file(file_path, bucket_name, s3_key)
 
-# DB saves
-def save_prediction_session(uid, original_image, predicted_image):
-    try:
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("""
-                INSERT INTO prediction_sessions (uid, original_image, predicted_image)
-                VALUES (?, ?, ?)
-            """, (uid, original_image, predicted_image))
-        print(f"[DEBUG] Saved to DB: {uid}")
-    except Exception as e:
-        print(f"[ERROR] Failed to save to DB: {e}")
-
-def save_detection_object(prediction_uid, label, score, box):
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            INSERT INTO detection_objects (prediction_uid, label, score, box)
-            VALUES (?, ?, ?, ?)
-        """, (prediction_uid, label, score, str(box)))
-
 @app.get("/")
 def read_root():
     return {"message": "Welcome!"}
 
 @app.get("/predictions/score/{min_score}")
 def get_predictions_by_score(min_score: float):
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute("""
-            SELECT DISTINCT ps.uid, ps.timestamp
-            FROM prediction_sessions ps
-            JOIN detection_objects do ON ps.uid = do.prediction_uid
-            WHERE do.score >= ?
-        """, (min_score,)).fetchall()
+    return storage.get_predictions_by_score(min_score)
 
-        return [{"uid": row["uid"], "timestamp": row["timestamp"]} for row in rows]
+@app.get("/predictions/{uid}")
+def get_prediction(uid: str):
+    result = storage.get_prediction(uid)
+    if result:
+        return result
+    raise HTTPException(status_code=404, detail="Prediction not found")
 
 
 @app.post("/predict")
@@ -132,9 +93,6 @@ async def predict_s3(request: Request):
         # יצירת UID ושמות קבצים
         uid = str(uuid.uuid4())
         print(f"[DEBUG] Generated UID: {uid}")
-        with sqlite3.connect(DB_PATH) as conn:
-            result = conn.execute("SELECT * FROM prediction_sessions WHERE uid = ?", (uid,)).fetchone()
-            print("[DEBUG] Retrieved from DB:", result)
         base_name , ext= os.path.splitext(os.path.basename(image_name))
         original_path = os.path.join(UPLOAD_DIR, f"{uid}{ext}")
         predicted_name=f"{base_name}_predicted{ext}"
@@ -153,7 +111,7 @@ async def predict_s3(request: Request):
 
         # שלב 4: שמירת המידע במסד נתונים
         print("[INFO] Saving prediction to database...")
-        save_prediction_session(uid, original_path, predicted_path)
+        storage.save_prediction(uid, original_path, predicted_path)
 
         detected_labels = []
         for box in results[0].boxes:
@@ -161,7 +119,7 @@ async def predict_s3(request: Request):
             label = model.names[label_idx]
             score = float(box.conf[0])
             bbox = box.xyxy[0].tolist()
-            save_detection_object(uid, label, score, bbox)
+            storage.save_detection(uid, label, score, bbox)
             detected_labels.append(label)
 
         print("🧠 Detected objects:", ", ".join(detected_labels))  #
@@ -187,7 +145,6 @@ async def predict_s3(request: Request):
 @app.get("/health")
 def health():
     return {"status": "ok", "version": "1.0.1"}
-
 
 # 👇 Load these only once
 QUEUE_URL = os.environ.get("SQS_QUEUE_URL")
